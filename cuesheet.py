@@ -619,6 +619,8 @@ def build_cues(tl: Timeline, rules: dict, merge_gap_frames: int = 0,
                 runs.append([e])
         meta = source_meta(evs[0], rules) or {}
         missing = [f for f in req.get(cat, []) if not str(meta.get(f, "")).strip()]
+        if cat == "audio-review":
+            missing = ["category"]  # still undecided, even if the rights file lists it
         for run in runs:
             cues.append(Cue(
                 number=0, category=cat, source=src, path=run[0].path,

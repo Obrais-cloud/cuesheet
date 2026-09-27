@@ -194,6 +194,10 @@ class DefaultRules(unittest.TestCase):
         tl = cs.Timeline("t", 24, False, 0, [cs.Event("X_PCM.wav", "/V/X_PCM.wav", "audio", "A1", 0, 48)])
         data = tomllib.loads(cs.render_init(tl, cs.load_rules(None)))
         self.assertEqual(data["sources"]["X_PCM.wav"]["category"], "audio-review")
+        # feeding that file back must still flag the source as undecided
+        rules = cs.load_rules(None)
+        rules["sources"] = data["sources"]
+        self.assertEqual(cs.build_cues(tl, rules)[0].missing, ["category"])
 
 
 class BadInput(unittest.TestCase):
