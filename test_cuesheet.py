@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import tempfile
 import tomllib
 import unittest
 from pathlib import Path
@@ -110,6 +111,48 @@ class Cli(unittest.TestCase):
         self.assertTrue(rows[0].startswith("cue,category,source"))
         self.assertTrue(all(",archive," in r for r in rows[1:]))
         self.assertEqual(len(rows), 4)
+
+
+class Fcp7Xml(unittest.TestCase):
+    """Structure mirrors real Resolve 'FCP 7 XML' exports (xmeml v5)."""
+
+    def setUp(self):
+        self.c = cues_json(S / "fdv_fcp7.xml")
+
+    def test_rate_and_start_tc_from_sequence(self):
+        code, out, _ = run(S / "fdv_fcp7.xml", "--format", "json")
+        tl = json.loads(out)["timeline"]
+        self.assertEqual((tl["fps"], tl["start_tc"]), (23.976, "01:00:00:00"))
+
+    def test_transition_edges_and_file_refs_by_id(self):
+        ar1, ar2 = self.c["AR01"], self.c["AR02"]
+        self.assertEqual((ar1["tc_in"], ar1["tc_out"]), ("01:00:10:00", "01:00:20:00"))
+        self.assertEqual((ar2["tc_in"], ar2["tc_out"]), ("01:00:25:00", "01:00:30:00"))
+        self.assertEqual(ar2["path"], "/Volumes/FDV/Archivo TVG/ARCH_curros_1962.mov")
+
+    def test_stereo_music_one_cue_and_disabled_or_generators_skipped(self):
+        self.assertEqual(self.c["M01"]["tracks"], ["A1", "A2"])
+        self.assertEqual(self.c["M01"]["seconds"], 30.03)
+        self.assertEqual(set(self.c), {"M01", "AR01", "AR02"})
+
+
+class BadInput(unittest.TestCase):
+    def test_unknown_xml_is_an_error_not_an_empty_report(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.xml"
+            p.write_text("<?xml version='1.0'?><project><thing/></project>")
+            code, out, err = run(p)
+        self.assertEqual(code, 1)
+        self.assertIn("unsupported XML", err)
+        self.assertEqual(out, "")
+
+    def test_timeline_with_no_events_is_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "x.edl"
+            p.write_text("TITLE: nothing here\nFCM: NON-DROP FRAME\n")
+            code, _, err = run(p)
+        self.assertEqual(code, 1)
+        self.assertIn("no clip events", err)
 
 
 if __name__ == "__main__":

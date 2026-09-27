@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cuesheet — turn an edit timeline (CMX3600 EDL or FCPXML) into a music cue
+"""cuesheet — turn an edit timeline (CMX3600 EDL, FCP7 XML or FCPXML) into a music cue
 sheet and a third-party footage usage report, flagging missing rights data.
 
 Deterministic, stdlib only (Python 3.11+ for tomllib).
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field, asdict
 from fractions import Fraction
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # --------------------------------------------------------------------------- #
 # Timecode
@@ -359,14 +359,105 @@ def parse_fcpxml(text: str, fps_override: float | None = None) -> Timeline:
                     events=events)
 
 
+# --------------------------------------------------------------------------- #
+# FCP7 XML (xmeml) — what Resolve/Premiere write for "FCP 7 XML"
+# --------------------------------------------------------------------------- #
+
+
+def _xm_rate(el: ET.Element | None) -> float | None:
+    if el is None or el.find("timebase") is None:
+        return None
+    tb = int(el.findtext("timebase"))
+    ntsc = (el.findtext("ntsc") or "").upper() == "TRUE"
+    return round(tb * 1000 / 1001, 3) if ntsc else float(tb)
+
+
+def _xm_path(url: str) -> str:
+    from urllib.parse import unquote, urlparse
+    if not url:
+        return ""
+    u = urlparse(url)
+    return unquote(u.path) if u.scheme in ("file", "") else url
+
+
+def parse_xmeml(root: ET.Element, fps_override: float | None = None) -> Timeline:
+    seq = root.find("sequence")
+    if seq is None:
+        seq = root.find(".//sequence")
+    if seq is None:
+        raise ValueError("no <sequence> found in FCP7 XML")
+    fps = fps_override or _xm_rate(seq.find("rate")) or 25.0
+    tc = seq.find("timecode")
+    drop = tc is not None and (tc.findtext("displayformat") or "").upper() == "DF"
+    start = 0
+    if tc is not None:
+        if tc.findtext("frame") is not None:
+            start = int(tc.findtext("frame"))
+        elif tc.findtext("string"):
+            start = tc_to_frames(tc.findtext("string"), fps, drop)
+
+    # <file> is fully described on first use, then referenced by id only.
+    files: dict[str, dict] = {}
+    for f in seq.iter("file"):
+        fid = f.get("id")
+        if fid and (f.find("name") is not None or f.find("pathurl") is not None):
+            files[fid] = {"name": f.findtext("name") or "",
+                          "path": _xm_path(f.findtext("pathurl") or "")}
+
+    events: list[Event] = []
+    for kind in ("video", "audio"):
+        tracks = seq.findall(f"media/{kind}/track")
+        for n, track in enumerate(tracks, 1):
+            if (track.findtext("enabled") or "TRUE").upper() == "FALSE":
+                continue
+            items = list(track)
+            for i, it in enumerate(items):
+                if it.tag != "clipitem":
+                    continue  # generatoritem = titles/solids, transitionitem handled below
+                if (it.findtext("enabled") or "TRUE").upper() == "FALSE":
+                    continue
+                s, e = int(it.findtext("start", "-1")), int(it.findtext("end", "-1"))
+                # -1 means "this edge sits inside a transition": take the transition's edge
+                if s < 0:
+                    prev = next((x for x in reversed(items[:i]) if x.tag == "transitionitem"), None)
+                    s = int(prev.findtext("start")) if prev is not None else -1
+                if e < 0:
+                    nxt = next((x for x in items[i + 1:] if x.tag == "transitionitem"), None)
+                    e = int(nxt.findtext("end")) if nxt is not None else -1
+                if s < 0 or e <= s:
+                    continue
+                f = it.find("file")
+                meta = files.get(f.get("id"), {}) if f is not None else {}
+                name = it.findtext("name") or meta.get("name") or ""
+                src_in = int(it.findtext("in", "0"))
+                events.append(Event(
+                    name=name, path=meta.get("path", ""), kind=kind,
+                    track=f"{'V' if kind == 'video' else 'A'}{n}",
+                    rec_in=s, rec_out=e, src_in=src_in, src_out=src_in + (e - s)))
+    return Timeline(title=seq.findtext("name") or "Untitled", fps=fps, drop=drop,
+                    start=start, events=events)
+
+
 def load_timeline(path: Path, fps: float | None) -> Timeline:
     if path.is_dir() and (path / "Info.fcpxml").exists():  # .fcpxmld bundle
         path = path / "Info.fcpxml"
     text = path.read_text(encoding="utf-8-sig", errors="replace")
     head = text.lstrip()[:200].lower()
-    if path.suffix.lower() in (".fcpxml", ".xml") or head.startswith("<?xml") or "<fcpxml" in head:
-        return parse_fcpxml(text, fps)
-    return parse_edl(text, fps or 25.0)
+    if path.suffix.lower() in (".fcpxml", ".xml") or head.startswith("<?xml") or head.startswith("<"):
+        root = ET.fromstring(text)
+        if root.tag == "xmeml":
+            tl = parse_xmeml(root, fps)
+        elif root.tag == "fcpxml":
+            tl = parse_fcpxml(text, fps)
+        else:
+            raise ValueError(f"{path.name}: unsupported XML <{root.tag}> "
+                             "(expected FCPXML or FCP7 XML/xmeml)")
+    else:
+        tl = parse_edl(text, fps or 25.0)
+    if not tl.events and text.strip():
+        # An empty report looks like "no rights issues" — never let that happen silently.
+        raise ValueError(f"{path.name}: no clip events could be read from this timeline")
+    return tl
 
 
 # --------------------------------------------------------------------------- #
@@ -699,7 +790,11 @@ def main(argv: list[str] | None = None) -> int:
 
     rules = load_rules(a.rules)
     fps = a.fps or rules.get("fps")
-    timelines = [load_timeline(t, fps) for t in a.timeline]
+    try:
+        timelines = [load_timeline(t, fps) for t in a.timeline]
+    except (ValueError, ET.ParseError, OSError) as exc:
+        print(f"cuesheet: {exc}", file=sys.stderr)
+        return 1
     tl = timelines[0]
     for other in timelines[1:]:
         # align on absolute record TC

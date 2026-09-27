@@ -1,8 +1,8 @@
 # cuesheet
 
 **The music cue sheet and archive-usage report your festival checklist asks for,
-straight from the edit.** `cuesheet` reads a timeline export (CMX3600 EDL from
-DaVinci Resolve/Premiere/Avid, or FCPXML from Final Cut / Resolve) and produces:
+straight from the edit.** `cuesheet` reads a timeline export (CMX3600 EDL,
+FCP 7 XML from Resolve/Premiere, or FCPXML from Final Cut / Resolve) and produces:
 
 - a **music cue sheet** — cue number, title, composer, publisher, PRO, usage
   (BI/BV/VI/VV…), TC in/out, duration;
@@ -34,6 +34,7 @@ two. The edit already has all of this; `cuesheet` just reads it.
 # 3. Generate the cue sheet
 ./cuesheet.py FDV_v12_*.edl -r rights.toml                 # Markdown
 ./cuesheet.py FDV_v12_*.edl -r rights.toml -f csv -o cues.csv
+./cuesheet.py FDV_v12.xml -r rights.toml             # FCP 7 XML: all tracks
 ./cuesheet.py FDV_FCP.fcpxml -r rights.toml -f json
 
 # 4. In a delivery script: fail if any cue lacks rights data
@@ -72,15 +73,30 @@ Timeline handling:
 - **EDL**: `* FROM CLIP NAME` / `* SOURCE FILE` comments, dissolves (the
   incoming `TO CLIP NAME` is used), black/`BL` events ignored, V/A/A2/AA/B
   channels.
+- **FCP 7 XML** (`xmeml`, Resolve *File → Export → Timeline → FCP 7 XML*):
+  every video and audio track, rate/NTSC and start TC from the sequence,
+  `<file>` references by id, clip edges inside transitions (`-1`), disabled
+  clips and generators (titles, solids) skipped. **Prefer this over EDL from
+  Resolve**: a Resolve EDL holds a single video track, the XML holds all of them.
 - **FCPXML** (1.8–1.11 + `.fcpxmld` bundles): primary storyline, connected
   clips and secondary storylines (which may extend past their parent), gaps,
   compound clips (`ref-clip`, trimmed to the visible part), disabled clips are
   skipped.
 
-## Limits
+An XML it doesn't recognise, or a timeline it reads zero clips from, is an
+**error (exit 1)**, never an empty report — an empty cue sheet would read as
+"no rights issues".
 
-- Tested against hand-written fixtures in the Resolve/FCP export formats, not yet
-  against a real project export — run it on your next export and compare.
+## Validated on real exports
+
+Run against the Fillos do Vento Resolve exports (6 FCP 7 XML + 1 EDL, 23.976 fps):
+all parse; the EDL and XML of the same timeline agree on 85/88 V1 events. The
+other 3 are a dissolve (the EDL ends the outgoing clip where the dissolve
+starts, the XML where it ends) and a section where the two files genuinely hold
+different cuts. None of those timelines carries music, so the music path is
+still covered only by the fixtures in `samples/`.
+
+## Limits
 - Multicam (`mc-clip`) angles aren't resolved to the active angle.
 - Retimed clips report timeline duration (correct for cue sheets), not source
   duration.
