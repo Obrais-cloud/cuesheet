@@ -53,17 +53,26 @@ Sample run on the bundled fixtures:
 
 ## How it decides what's what
 
-Built-in rules (override them with `[[category]]` tables in the TOML):
+Built-in rules, matched case-insensitively on clip name, file name and full
+path (override them with `[[category]]` tables in the TOML):
 
-| Category | Matches (clip name or file path) | Required fields |
+| Category | Matches | Required fields |
 |---|---|---|
-| `music` (audio only) | `*.wav/aif/mp3/flac/m4a`, `MUS_*`, `*/Music/*`, `*/Musica/*` — excluding `*sync*`, `*VO*`, `*dialog*`, `*/SFX/*` | title, composer, publisher, pro, usage |
+| `sfx` (audio) | `*sfx*`, `*foley*`, `*/fx/*`, "sound effect", "efecto(s) de sonido" | owner, license |
+| `music` (audio) | `MUS_*`, music / música / score / soundtrack / banda sonora, BSO, OST — **only with that evidence** in the name or folder | title, composer, publisher, pro, usage |
 | `archive` | `ARCH_*`, `ARCHIVO_*`, `*/Archive/*`, `*/Archivo/*` | owner, license |
-| `stock` | `STOCK_*`, `*/Stock/*`, pond5, shutterstock, getty, storyblocks, artgrid | owner, license |
+| `stock` | `STOCK_*`, `*/Stock/*`, pond5, shutterstock, getty, storyblocks, artgrid, artlist, envato | owner, license |
+| `audio-review` (audio) | any other audio file (`.wav/.aif/.mp3/.flac/.m4a/.bwf`) | a decision — always flagged, fails `--strict` |
 
-A source listed in `[sources."name"]` can force its category
-(`category = "archive"`), and `--init` lists unclassified sources commented out
-so you can pull in anything the rules missed.
+Production sound is never a cue: camera rolls (`A001_C002_*`, `*.RDC/*`,
+`C0001.MP4`), recorder takes (`ZOOM0040_Tr1.WAV`, `200310_001.WAV`, `…-T017.WAV`),
+sync, VO, dialogue.
+
+An unknown audio file is never silently called music: it lands in
+**audio-review** until the rights file decides — `category = "music"`, `"sfx"`,
+or `""` (not a cue, ignore it). A source listed in `[sources."name"]` can force
+any category, and `--init` lists unclassified sources commented out so you can
+pull in anything the rules missed.
 
 Merging: uses of the same source that overlap or touch on the timeline
 (stereo pairs, an edit inside a continuous music cue) become one cue.
@@ -89,12 +98,25 @@ An XML it doesn't recognise, or a timeline it reads zero clips from, is an
 
 ## Validated on real exports
 
-Run against the Fillos do Vento Resolve exports (6 FCP 7 XML + 1 EDL, 23.976 fps):
-all parse; the EDL and XML of the same timeline agree on 85/88 V1 events. The
-other 3 are a dissolve (the EDL ends the outgoing clip where the dissolve
-starts, the XML where it ends) and a section where the two files genuinely hold
-different cuts. None of those timelines carries music, so the music path is
-still covered only by the fixtures in `samples/`.
+**Feature timeline (music path).** A 31.7-min cut of the Fillos do Vento
+feature (Resolve Studio 21.1, 23.976, 7 video + 17 audio tracks, 1 005 audio
+clips) exported by Resolve itself to FCP 7 XML, FCPXML 1.10 (`.fcpxmld`) and
+EDL, and compared with the clip list read back through Resolve's scripting API:
+
+| | FCP 7 XML | FCPXML 1.10 | EDL |
+|---|---|---|---|
+| Cues identical to Resolve (source + TC in/out) | **31/31** | **31/31** | — (video only) |
+| Clips read vs Resolve's 802 media clips | 802 (757 frame-exact, rest ±a few frames at transitions) | 771 | 139 (V1) |
+
+With the default rules: 13 music sources (all the score and licensed tracks),
+8 SFX sources (all library effects), 3 flagged for review (conformed production
+audio), and 0 music missed among the 94 ignored production-sound sources.
+
+**Installation timelines.** 6 FCP 7 XML + 2 EDL (23.976) from the same project
+all parse; EDL and XML of the same timeline agree on 85/88 V1 events.
+
+**Use FCP 7 XML from Resolve**: it holds every track and matched Resolve best;
+a Resolve EDL holds one video track and no audio.
 
 ## Limits
 - Multicam (`mc-clip`) angles aren't resolved to the active angle.

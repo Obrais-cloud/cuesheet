@@ -25,6 +25,7 @@
                     </clipitem>
                     <transitionitem>
                         <start>240</start><end>264</end>
+                        <alignment>center</alignment>
                         <effect><name>Cross Dissolve</name></effect>
                     </transitionitem>
                     <clipitem id="ARCH_curros_1962.mov 0">

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field, asdict
 from fractions import Fraction
 from pathlib import Path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # --------------------------------------------------------------------------- #
 # Timecode
@@ -307,8 +307,13 @@ def parse_fcpxml(text: str, fps_override: float | None = None) -> Timeline:
             lane = int(ch.get("lane", "0")) or inherited_lane
             abs_in = origin + (offset - parent_start)
             if tag == "spine":
-                # A storyline's children keep the container's time base.
-                walk(ch, origin, parent_start, lane, (win_in, win_out), outer, audio_only)
+                # A secondary storyline sits at `offset` in its parent's time and
+                # its children count their offsets from the storyline's own 0
+                # (verified against Resolve 21 FCPXML 1.10 exports).
+                if ch.get("offset") is not None:
+                    walk(ch, abs_in, Fraction(0), lane, (win_in, win_out), outer, audio_only)
+                else:
+                    walk(ch, origin, parent_start, lane, (win_in, win_out), outer, audio_only)
                 continue
             if tag == "gap":
                 walk(ch, abs_in, start, lane, (max(win_in, abs_in),
@@ -381,6 +386,18 @@ def _xm_path(url: str) -> str:
     return unquote(u.path) if u.scheme in ("file", "") else url
 
 
+def _xm_cut(tr: ET.Element) -> int:
+    """Edit point of a transitionitem: its start/end for start-/end-aligned
+    transitions (incl. *-black), the midpoint for centred ones."""
+    s, e = int(tr.findtext("start", "-1")), int(tr.findtext("end", "-1"))
+    align = (tr.findtext("alignment") or "center").lower()
+    if align.startswith("start"):
+        return s
+    if align.startswith("end"):
+        return e
+    return (s + e) // 2
+
+
 def parse_xmeml(root: ET.Element, fps_override: float | None = None) -> Timeline:
     seq = root.find("sequence")
     if seq is None:
@@ -418,13 +435,17 @@ def parse_xmeml(root: ET.Element, fps_override: float | None = None) -> Timeline
                 if (it.findtext("enabled") or "TRUE").upper() == "FALSE":
                     continue
                 s, e = int(it.findtext("start", "-1")), int(it.findtext("end", "-1"))
-                # -1 means "this edge sits inside a transition": take the transition's edge
-                if s < 0:
-                    prev = next((x for x in reversed(items[:i]) if x.tag == "transitionitem"), None)
-                    s = int(prev.findtext("start")) if prev is not None else -1
-                if e < 0:
-                    nxt = next((x for x in items[i + 1:] if x.tag == "transitionitem"), None)
-                    e = int(nxt.findtext("end")) if nxt is not None else -1
+                src_len = int(it.findtext("out", "0")) - int(it.findtext("in", "0"))
+                # -1 means "this edge sits inside a transition": use the transition's
+                # edit point, which is what Resolve itself reports for the clip.
+                if s < 0 and i > 0 and items[i - 1].tag == "transitionitem":
+                    s = _xm_cut(items[i - 1])
+                if e < 0 and i + 1 < len(items) and items[i + 1].tag == "transitionitem":
+                    e = _xm_cut(items[i + 1])
+                if s < 0 <= e and src_len > 0:
+                    s = e - src_len
+                if e < 0 <= s and src_len > 0:
+                    e = s + src_len
                 if s < 0 or e <= s:
                     continue
                 f = it.find("file")
@@ -465,22 +486,42 @@ def load_timeline(path: Path, fps: float | None) -> Timeline:
 # Rules / rights
 # --------------------------------------------------------------------------- #
 
+# Patterns are matched case-insensitively against clip name, file path and file name.
+# Production sound (camera rolls, recorder takes, sync, VO, dialogue) is never a cue.
+PRODUCTION_AUDIO = [
+    "*.rdc/*", "a[0-9][0-9][0-9]_c[0-9][0-9][0-9]_*", "c[0-9][0-9][0-9][0-9].*",
+    "*-t[0-9][0-9][0-9]*.wav", "zoom[0-9][0-9][0-9][0-9]*", "*_tr[0-9]*.wav",
+    "[0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9]*.wav", "*sync*", "*/vo/*", "vo_*", "*_vo_*",
+    "*dialog*", "*dialogo*", "*diálogo*", "*/dx/*",
+]
+AUDIO_EXT = ["*.wav", "*.aif", "*.aiff", "*.mp3", "*.flac", "*.m4a", "*.ogg", "*.bwf"]
+
 DEFAULT_RULES = {
     "category": [
+        {"name": "sfx", "kind": "audio",
+         "match": ["*sfx*", "*/fx/*", "*foley*", "*sound effect*", "*efecto de sonido*",
+                   "*efectos de sonido*", "*/efectos/*"],
+         "exclude": PRODUCTION_AUDIO,
+         "required": ["owner", "license"]},
         {"name": "music", "kind": "audio",
-         "match": ["*.wav", "*.aif", "*.aiff", "*.mp3", "*.flac", "*.m4a",
-                   "MUS_*", "*/Music/*", "*/MUSIC/*", "*/Musica/*", "*/MUSICA/*"],
-         "exclude": ["*VO*", "*vo_*", "*DIALOG*", "*dialog*", "*/SFX/*",
-                     "*/Dialogue/*", "*/VO/*", "*sync*"],
+         "match": ["mus_*", "*music*", "*musica*", "*música*", "*score*",
+                   "*soundtrack*", "*banda sonora*",
+                   "*[ _/(-]bso[ _/)-]*", "bso[ _-]*", "*[ _/(-]ost[ _/)-]*", "ost[ _-]*"],
+         "exclude": PRODUCTION_AUDIO,
          "required": ["title", "composer", "publisher", "pro", "usage"]},
         {"name": "archive",
-         "match": ["ARCH_*", "ARCHIVO_*", "*/Archive/*", "*/ARCHIVE/*",
-                   "*/Archivo/*", "*/ARCHIVO/*"],
+         "match": ["arch_*", "archivo_*", "*/archive/*", "*/archivo/*"],
          "required": ["owner", "license"]},
         {"name": "stock",
-         "match": ["STOCK_*", "*/Stock/*", "*/STOCK/*", "*shutterstock*",
-                   "*gettyimages*", "*pond5*", "*storyblocks*", "*artgrid*"],
+         "match": ["stock_*", "*/stock/*", "*shutterstock*", "*gettyimages*", "*pond5*",
+                   "*storyblocks*", "*artgrid*", "*artlist*", "*envato*"],
          "required": ["owner", "license"]},
+        # Any other audio file: don't guess. It stays "to review" (and fails
+        # --strict) until the rights file says what it is.
+        {"name": "audio-review", "kind": "audio",
+         "match": AUDIO_EXT,
+         "exclude": PRODUCTION_AUDIO,
+         "required": ["category"]},
     ],
     "merge_gap_seconds": 0.0,
 }
@@ -503,15 +544,15 @@ def load_rules(path: Path | None) -> dict:
 
 
 def _match(patterns, e: Event) -> bool:
-    cands = [e.name, e.path, Path(e.path).name if e.path else ""]
-    return any(c and fnmatch.fnmatch(c, p) for p in patterns for c in cands)
+    cands = [c.casefold() for c in (e.name, e.path, Path(e.path).name if e.path else "") if c]
+    return any(fnmatch.fnmatchcase(c, p.casefold()) for p in patterns for c in cands)
 
 
 def classify(e: Event, rules: dict) -> str | None:
     # explicit per-source category wins
     src = source_meta(e, rules)
-    if src and src.get("category"):
-        return src["category"]
+    if src and "category" in src:
+        return src["category"] or None  # category = "" means: not a cue, ignore
     for cat in rules["category"]:
         if cat.get("kind") and cat["kind"] != e.kind:
             continue
@@ -596,7 +637,8 @@ def build_cues(tl: Timeline, rules: dict, merge_gap_frames: int = 0,
 
 
 def cue_label(c: Cue) -> str:
-    prefix = {"music": "M", "archive": "AR", "stock": "ST"}.get(c.category,
+    prefix = {"music": "M", "sfx": "FX", "archive": "AR", "stock": "ST",
+              "audio-review": "RV"}.get(c.category,
                                                               c.category[:2].upper())
     return f"{prefix}{c.number:02d}"
 
@@ -640,7 +682,8 @@ def render_md(tl: Timeline, cues: list[Cue]) -> str:
              f" · TC inicio {frames_to_tc(tl.start, tl.fps, tl.drop)}",
              f"- Generado por cuesheet {__version__}", ""]
     music = [c for c in cues if c.category == "music"]
-    other = [c for c in cues if c.category != "music"]
+    review = [c for c in cues if c.category == "audio-review"]
+    other = [c for c in cues if c.category not in ("music", "audio-review")]
     if music:
         lines += ["## Música", "",
                   "| Cue | Título | Compositor | Editorial | Sociedad | Uso | TC in | TC out | Duración | Fuente |",
@@ -658,7 +701,7 @@ def render_md(tl: Timeline, cues: list[Cue]) -> str:
         lines += ["", f"Total música: **{frames_to_dur(mtotal, tl.fps)}** en "
                   f"{len(music)} cues.", ""]
     if other:
-        lines += ["## Material de terceros (archivo / stock)", "",
+        lines += ["## Material de terceros (efectos / archivo / stock)", "",
                   "| Cue | Categoría | Fuente | Titular | Licencia | TC in | TC out | Duración |",
                   "|---|---|---|---|---|---|---|---|"]
         for c in other:
@@ -667,6 +710,15 @@ def render_md(tl: Timeline, cues: list[Cue]) -> str:
                 cue_label(c), c.category, c.source, m.get("owner") or "⚠",
                 m.get("license") or "⚠", _tc(c.rec_in, tl), _tc(c.rec_out, tl),
                 frames_to_dur(c.frames, tl.fps)]) + " |")
+        lines.append("")
+    if review:
+        srcs = sorted({c.source for c in review})
+        lines += [f"## ⚠ Audio sin clasificar ({len(srcs)} fuentes)", "",
+                  "Ni música, ni efectos, ni sonido directo según las reglas. Decide en el "
+                  'fichero de derechos: `category = "music"`, `"sfx"` o `""` (no es un cue).', ""]
+        for src in srcs:
+            fr = sum(c.frames for c in review if c.source == src)
+            lines.append(f"- `{src}` — {frames_to_dur(fr, tl.fps)}")
         lines.append("")
     summ = summarize(cues, tl)
     if summ:
@@ -747,7 +799,11 @@ def render_init(tl: Timeline, rules: dict) -> str:
         existing = rules.get("sources", {}).get(k, {})
         out.append(f"[sources.{toml_str(k)}]")
         out.append(f"category = {toml_str(cat)}")
+        if cat == "audio-review":
+            out[-1] = 'category = "audio-review"  # ⚠ cámbialo: "music", "sfx" o "" (no es un cue)'
         for f in req.get(cat, []):
+            if f == "category":
+                continue
             out.append(f"{f} = {toml_str(str(existing.get(f, '')))}")
         if e.path:
             out.append(f"# path: {e.path}")

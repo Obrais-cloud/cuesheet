@@ -126,7 +126,8 @@ class Fcp7Xml(unittest.TestCase):
 
     def test_transition_edges_and_file_refs_by_id(self):
         ar1, ar2 = self.c["AR01"], self.c["AR02"]
-        self.assertEqual((ar1["tc_in"], ar1["tc_out"]), ("01:00:10:00", "01:00:20:00"))
+        # centred dissolve 240-264 -> edit point 252 (what Resolve reports)
+        self.assertEqual((ar1["tc_in"], ar1["tc_out"]), ("01:00:10:12", "01:00:20:00"))
         self.assertEqual((ar2["tc_in"], ar2["tc_out"]), ("01:00:25:00", "01:00:30:00"))
         self.assertEqual(ar2["path"], "/Volumes/FDV/Archivo TVG/ARCH_curros_1962.mov")
 
@@ -134,6 +135,65 @@ class Fcp7Xml(unittest.TestCase):
         self.assertEqual(self.c["M01"]["tracks"], ["A1", "A2"])
         self.assertEqual(self.c["M01"]["seconds"], 30.03)
         self.assertEqual(set(self.c), {"M01", "AR01", "AR02"})
+
+
+class TransitionEditPoint(unittest.TestCase):
+    """Alignments seen in a real Resolve FCP 7 XML export (center/start/end-black)."""
+
+    def cut(self, align):
+        import xml.etree.ElementTree as ET
+        return cs._xm_cut(ET.fromstring(
+            f"<transitionitem><start>100</start><end>150</end>"
+            f"<alignment>{align}</alignment></transitionitem>"))
+
+    def test_alignments(self):
+        self.assertEqual(self.cut("center"), 125)
+        self.assertEqual(self.cut("start"), 100)
+        self.assertEqual(self.cut("start-black"), 100)
+        self.assertEqual(self.cut("end-black"), 150)
+
+
+class DefaultRules(unittest.TestCase):
+    """Names and folders as they appear in a real feature timeline (Resolve 21)."""
+
+    def cat(self, name, path="", kind="audio", sources=None):
+        rules = cs.load_rules(None)
+        if sources:
+            rules["sources"] = sources
+        return cs.classify(cs.Event(name, path, kind, "A1", 0, 10), rules)
+
+    def test_music_needs_evidence(self):
+        self.assertEqual(self.cat("Alex Aller - Baixada.mp3",
+                                  "/V/A RAPA/04_Music/A Rapa (BSO - Demos)/Alex Aller - Baixada.mp3"), "music")
+        self.assertEqual(self.cat("O Monte - riser.wav",
+                                  "/V/Alex Aller Manipulated Score/O Monte - riser.wav"), "music")
+        self.assertEqual(self.cat("FDV_SOUND_OST_18min.wav", "/V/x/FDV_SOUND_OST_18min.wav"), "music")
+        self.assertNotEqual(self.cat("Postproduction_host.wav", "/V/x/Postproduction_host.wav"), "music")
+
+    def test_sfx_libraries(self):
+        self.assertEqual(self.cat("Bass Boom Rumbling.wav",
+                                  "/V/02_SFX/Foley SFX/Bass Boom Rumbling.wav"), "sfx")
+        self.assertEqual(self.cat("Lluvia.mp3", "/V/USB/EFECTOS DE SONIDO/Lluvia.mp3"), "sfx")
+
+    def test_production_sound_is_never_a_cue(self):
+        for name, path in [
+            ("ZOOM0040_Tr1.WAV", "/V/Audio/ZOOM0040/ZOOM0040_Tr1.WAV"),
+            ("200310_001.WAV", "/V/Audio/Zoom F2/200310_001.WAV"),
+            ("070318 DIA1 SABUCEDO-T017.WAV", "/V/Audio/070318 DIA1 SABUCEDO-T017.WAV"),
+            ("A005_C009_0706BB_A01_001.wav", "/V/RED/A005_C009_0706BB.RDC/A005_C009_0706BB_A01_001.wav"),
+        ]:
+            self.assertIsNone(self.cat(name, path), name)
+
+    def test_unknown_audio_is_flagged_for_review_and_can_be_ignored(self):
+        path = "/V/MEZCLA/C028_PCM_ORIGINAL_4CH_v001.wav"
+        self.assertEqual(self.cat("C028_PCM_ORIGINAL_4CH_v001.wav", path), "audio-review")
+        self.assertIsNone(self.cat("C028_PCM_ORIGINAL_4CH_v001.wav", path,
+                                   sources={"C028_PCM_ORIGINAL_4CH_v001.wav": {"category": ""}}))
+
+    def test_init_for_review_sources_is_valid_toml(self):
+        tl = cs.Timeline("t", 24, False, 0, [cs.Event("X_PCM.wav", "/V/X_PCM.wav", "audio", "A1", 0, 48)])
+        data = tomllib.loads(cs.render_init(tl, cs.load_rules(None)))
+        self.assertEqual(data["sources"]["X_PCM.wav"]["category"], "audio-review")
 
 
 class BadInput(unittest.TestCase):
