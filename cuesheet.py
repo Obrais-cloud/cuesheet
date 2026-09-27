@@ -258,7 +258,8 @@ def parse_fcpxml(text: str, fps_override: float | None = None) -> Timeline:
     if seq is None:
         seq = root.find(".//sequence")
     if seq is None:
-        raise ValueError("no <sequence> found in FCPXML")
+        raise ValueError("this FCPXML holds no timeline (<sequence>) — probably a clip or "
+                         "event export; export the timeline itself")
     fd = formats.get(seq.get("format") or "", Fraction(1, 25))
     fps = fps_override or float(1 / fd)
     if abs(fps - round(fps)) > 0.001:
