@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE fcpxml>
+<fcpxml version="1.10">
+  <resources>
+    <format id="r1" name="FFVideoFormat2160p25" frameDuration="1/25s" width="3840" height="2160"/>
+    <asset id="r2" name="A001_C003_FDV" start="0s" duration="600s" hasVideo="1" hasAudio="1" format="r1" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="file:///Volumes/FDV/Rushes/A001_C003_FDV.mov"/>
+    </asset>
+    <asset id="r3" name="Cantiga do vento" start="0s" duration="240s" hasAudio="1" audioSources="1" audioChannels="2" audioRate="48000">
+      <media-rep kind="original-media" src="file:///Volumes/FDV/Music/cantiga_do_vento_v3.wav"/>
+    </asset>
+    <asset id="r4" name="curros_1962" start="0s" duration="120s" hasVideo="1" format="r1">
+      <media-rep kind="original-media" src="file:///Volumes/FDV/Archive/curros_1962.mov"/>
+    </asset>
+    <asset id="r6" name="drone_pass" start="0s" duration="60s" hasVideo="1" format="r1">
+      <media-rep kind="original-media" src="file:///Volumes/FDV/Rushes/drone_pass.mov"/>
+    </asset>
+    <media id="r5" name="Compound Horses">
+      <sequence format="r1" duration="10s" tcStart="0s">
+        <spine>
+          <asset-clip ref="r4" offset="0s" start="30s" duration="6s" name="curros_1962"/>
+          <asset-clip ref="r6" offset="6s" start="10s" duration="4s" name="drone_pass"/>
+        </spine>
+      </sequence>
+    </media>
+  </resources>
+  <library>
+    <event name="FDV">
+      <project name="FDV_FCP_v3">
+        <sequence format="r1" tcStart="3600/1s" tcFormat="NDF" duration="40s" audioLayout="stereo" audioRate="48k">
+          <spine>
+            <asset-clip ref="r2" offset="3600s" start="10s" duration="10s" name="A001_C003_FDV" audioRole="dialogue">
+              <asset-clip ref="r3" lane="-1" offset="12s" start="0s" duration="30s" name="Cantiga do vento" audioRole="music"/>
+            </asset-clip>
+            <gap name="Gap" offset="3610s" start="3600s" duration="5s">
+              <asset-clip ref="r4" lane="1" offset="3600s" start="60s" duration="5s" name="curros_1962"/>
+            </gap>
+            <ref-clip ref="r5" offset="3615s" start="2s" duration="8s" name="Compound Horses"/>
+            <asset-clip ref="r6" offset="3623s" start="0s" duration="5s" name="drone_pass" enabled="0"/>
+          </spine>
+        </sequence>
+      </project>
+    </event>
+  </library>
+</fcpxml>

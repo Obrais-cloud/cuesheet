@@ -1,0 +1,20 @@
+# Example rights file for the FDV rough cut
+merge_gap_seconds = 0.0
+
+[sources."MUS_Cantiga_do_vento.wav"]
+title = "Cantiga do vento"
+composer = "Compositora Ejemplo"
+publisher = "Editorial Ejemplo"
+pro = "SGAE"
+usage = "BI"
+
+[sources."MUS_Muineira_de_Sabucedo.wav"]
+title = "Muiñeira de Sabucedo"
+composer = "Tradicional (arr. Ejemplo)"
+publisher = ""
+pro = "SGAE"
+usage = "VI"
+
+[sources."ARCH_TVG_1978_rapa.mov"]
+owner = "Archivo TV Ejemplo"
+license = "LIC-0001 (festival + TV España, 5 años)"

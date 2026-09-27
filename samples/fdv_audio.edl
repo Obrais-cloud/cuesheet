@@ -1,0 +1,20 @@
+TITLE: FDV_ROUGH_v12
+FCM: NON-DROP FRAME
+
+001  AX       A     C        00:00:00:00 00:00:30:00 01:00:00:00 01:00:30:00
+* FROM CLIP NAME: MUS_Cantiga_do_vento.wav
+
+002  AX       A2    C        00:00:00:00 00:00:30:00 01:00:00:00 01:00:30:00
+* FROM CLIP NAME: MUS_Cantiga_do_vento.wav
+
+003  AX       A3    C        00:03:10:00 00:03:25:00 01:00:05:00 01:00:20:00
+* FROM CLIP NAME: interview_sync_Xan.wav
+
+004  AX       A     C        00:00:30:00 00:00:45:00 01:00:30:00 01:00:45:00
+* FROM CLIP NAME: MUS_Cantiga_do_vento.wav
+
+005  AX       A     C        00:00:00:00 00:00:20:00 01:01:00:00 01:01:20:00
+* FROM CLIP NAME: MUS_Muineira_de_Sabucedo.wav
+
+006  AX       A     C        00:00:40:00 00:00:58:00 01:01:22:00 01:01:40:00
+* FROM CLIP NAME: MUS_Muineira_de_Sabucedo.wav
